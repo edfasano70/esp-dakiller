@@ -1,0 +1,10 @@
+# Artefactos de compilación de arduino-cli
+build/
+
+# Binarios exportados
+*.bin
+*.elf
+*.map
+
+# Configuración/estado de Arduino
+.arduino15/
