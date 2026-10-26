@@ -8,3 +8,6 @@ build/
 
 # Configuración/estado de Arduino
 .arduino15/
+
+# Artefactos de sesión de pi
+pi-session-*.html
