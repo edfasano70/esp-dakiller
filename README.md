@@ -8,6 +8,8 @@ objetivo (3 horas por defecto, configurable desde la web hasta 99 días),
 estado del relé se guardan en la EEPROM emulada en flash, por lo que sobreviven
 a reinicios y cortes de alimentación.
 
+Repositorio: <https://github.com/edfasano70/esp-dakiller>
+
 ## Características
 
 - Conteo acumulativo basado en `millis()` (sin depender de un RTC).
@@ -27,15 +29,27 @@ a reinicios y cortes de alimentación.
 |--------------|------------|-------------------|------------------------------------------|
 | Relé         | GPIO 5     | D1                | Activo en ALTO por defecto (ver `RELE_ACTIVO_ALTO`) |
 | Reset        | GPIO 14    | D5                | `INPUT_PULLUP`: conéctalo a GND para resetear |
-| LED interno  | GPIO 2     | D4                | Activo en BAJO (LED_BUILTIN) |
+| LED interno  | GPIO 2     | D4                | Activo en BAJO (`LED_BUILTIN`) |
 
-> Se evitan GPIO0, 1, 2, 3, 15 y 16 porque tienen estados especiales durante el
-> arranque. Si usas otro módulo, ajusta `RELE_PIN` y `RESET_PIN` a pines seguros.
+> Se evitan GPIO0, 1, 2, 3, 15 y 16 para el relé porque tienen estados
+> especiales durante el arranque. Si usas otro módulo, ajusta `RELE_PIN` y
+> `RESET_PIN` a pines seguros.
+
+### Conexión del relé
+
+| Módulo de relé | Conexión                                      |
+|----------------|-----------------------------------------------|
+| `VCC`          | 5 V (VIN/USB) o 3V3 según el módulo           |
+| `GND`          | GND del ESP8266                               |
+| `IN`           | GPIO5 (D1)                                    |
 
 > Al arrancar, algunos GPIO del ESP8266 quedan en HIGH brevemente. Si tu módulo
 > de relé es activo en ALTO puede dar un pulso corto; los módulos activos en BAJO
 > (lo más habitual) no se activan con ese pulso. Ajusta `RELE_ACTIVO_ALTO` según
 > corresponda.
+
+> Muchos módulos de relé de 5 V no conmutan de forma fiable con lógica de 3.3 V.
+> Si es tu caso, usa un módulo optoacoplado o un transistor/etapa de nivel.
 
 ## Cómo funciona
 
@@ -68,7 +82,7 @@ El ESP8266 crea su propia red WiFi:
 |------------|--------------------------------------------|
 | Red (SSID) | `DaKiller-XXXX` (XXXX = últimos 4 dígitos de la MAC) |
 | Contraseña | `12345678`                                 |
-| URL        | http://192.168.4.1                         |
+| URL        | <http://192.168.4.1>                       |
 
 Por ejemplo, para la MAC `BC:FF:4D:CF:E9:2B`, el SSID es `DaKiller-E92B`.
 
@@ -108,10 +122,10 @@ Endpoints HTTP (por si quieres automatizarlos):
 La red deja de emitir si el ESP8266 se queda sin alimentación; al volver a
 encenderla, el AP se levanta de nuevo.
 
-
 ## Configuración
 
-Los parámetros principales están al inicio de `dakiller-esp8266.ino`:
+Los parámetros principales están al inicio de
+`dakiller-esp8266/dakiller-esp8266.ino`:
 
 ```cpp
 const int RELE_PIN = 5;                     // GPIO del relé
@@ -132,31 +146,64 @@ const char *AP_PASS = "12345678";           // Mínimo 8 caracteres
 
 > El objetivo se puede cambiar en caliente desde la web; no hace falta recompilar.
 
-## Compilar y subir con arduino-cli
+## Instalación
 
-Requiere el core `esp8266:esp8266`.
+### Requisitos
+
+- Placa ESP8266 (NodeMCU, Wemos D1 mini o similar).
+- [arduino-cli](https://arduino.github.io/arduino-cli/) o Arduino IDE 2.x con el
+  core `esp8266:esp8266`.
+- Módulo de relé y cables.
+
+### Clonar el repositorio
+
+```bash
+git clone https://github.com/edfasano70/esp-dakiller.git
+cd esp-dakiller
+```
+
+### Compilar y subir con arduino-cli
 
 ```bash
 # 1. Instalar el core (si no lo tienes)
 arduino-cli core install esp8266:esp8266
 
-# 2. Compilar (placa genérica)
-arduino-cli compile --fqbn esp8266:esp8266:generic .
+# 2. Compilar el sketch (está en la subcarpeta dakiller-esp8266)
+arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 dakiller-esp8266
 
-# 3. Subir (ajusta el puerto y, si hace falta, el FQBN de tu placa)
-arduino-cli upload -p /dev/ttyUSB0 --fqbn esp8266:esp8266:generic .
+# 3. Subir (ajusta el puerto si es necesario)
+arduino-cli upload -p /dev/ttyUSB0 \
+  --fqbn esp8266:esp8266:nodemcuv2:baud=57600 dakiller-esp8266
 
 # 4. Ver la salida serie
 arduino-cli monitor -p /dev/ttyUSB0 -c baudrate=115200
 ```
 
-> Si tu placa es una NodeMCU o Wemos D1 mini, puedes usar
-> `esp8266:esp8266:nodemcuv2` en lugar de `generic`. Si la subida falla, revisa
-> la opción de tamaño de flash de tu módulo.
+> Arduino exige que el archivo `.ino` y su carpeta se llamen igual. Por eso el
+> sketch vive en `dakiller-esp8266/dakiller-esp8266.ino`; si renombras uno,
+> renombra también el otro.
+
+> Si tu placa es una NodeMCU o Wemos D1 mini, `nodemcuv2` es un buen punto de
+> partida. Para placas genéricas usa `esp8266:esp8266:generic`. Si la subida falla
+> con un CH340, prueba a `57600` baudios como en el ejemplo.
+
+### Abrir con Arduino IDE
+
+Abre `dakiller-esp8266/dakiller-esp8266.ino` con Arduino IDE, selecciona tu placa
+ESP8266 y el puerto, y pulsa **Subir**.
+
+## Estructura del repositorio
+
+```text
+esp-dakiller/
+├── README.md
+└── dakiller-esp8266/
+    └── dakiller-esp8266.ino
+```
 
 ## Salida serie de ejemplo
 
-```
+```text
 Tiempo objetivo: 03:00:00
 Tiempo recuperado de EEPROM: 00:00:00
 Rele inactivo. El conteo está en curso.
@@ -169,11 +216,25 @@ Guardando tiempo: 00:05:00
 
 Ejemplo con un objetivo de varios días:
 
-```
+```text
 Tiempo objetivo: 10d 00:00:00
 Tiempo actual transcurrido: 9d 23:59:59
 Tiempo actual transcurrido: 10d 00:00:00
 ```
+
+## Solución de problemas
+
+- **No aparece la red `DaKiller-XXXX`:** espera unos segundos tras encender,
+  comprueba la alimentación y que el firmware se haya subido correctamente.
+- **No puedo subir el sketch:** selecciona la placa correcta, instala el driver
+  del CH340 y prueba a `57600` baudios.
+- **La página web no carga:** asegúrate de estar conectado a la red del ESP8266
+  (no a tu WiFi habitual) y abre `http://192.168.4.1`.
+- **El relé se activa al arrancar:** probablemente tu módulo es activo en ALTO y
+  recibe un pulso durante el boot. Usa un módulo activo en BAJO o revisa
+  `RELE_ACTIVO_ALTO`.
+- **Se perdió el conteo tras actualizar el firmware:** si cambia la versión del
+  formato de EEPROM, el estado anterior se descarta y se inicializa de nuevo.
 
 ## Advertencias
 
