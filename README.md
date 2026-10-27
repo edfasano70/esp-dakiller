@@ -1,93 +1,190 @@
-# ESP32 DaKiller
+# ESP8266 DaKiller
 
-Temporizador acumulativo persistente para ESP32 que controla un relé.
+Temporizador acumulativo persistente para ESP8266 que controla un relé.
 
 El dispositivo acumula el tiempo que lleva funcionando y, al alcanzar un tiempo
-objetivo (3 horas por defecto), **activa un relé y detiene el conteo**. El tiempo
-acumulado y el estado del relé se guardan en la memoria no volátil (NVS), por lo
-que sobreviven a reinicios y cortes de alimentación.
+objetivo (3 horas por defecto, configurable desde la web hasta 99 días),
+**activa un relé y detiene el conteo**. El tiempo acumulado, el objetivo y el
+estado del relé se guardan en la EEPROM emulada en flash, por lo que sobreviven
+a reinicios y cortes de alimentación.
 
 ## Características
 
 - Conteo acumulativo basado en `millis()` (sin depender de un RTC).
-- Persistencia en NVS mediante `Preferences` (guardado cada 10 s).
+- Persistencia en EEPROM con validación por *magic number* y checksum.
 - Relé con estado persistente: si estaba activado al apagar, se restaura al arrancar.
 - Reset por hardware para reiniciar el conteo.
 - Filtro de rebotes (*debounce*) en el pin de reset.
 - Polaridad del relé configurable (activo en alto o en bajo).
+- Página web en modo punto de acceso (AP) para ver el estado y controlar el relé.
+- Tiempo objetivo configurable desde la web, de 1 segundo a 99 días.
+- LED interno: 1 destello por segundo en funcionamiento normal y una secuencia
+  de 10 destellos rápidos + 5 s de pausa cuando se cumple el objetivo.
 
-## Hardware / pines
+## Hardware / pines (ESP8266)
 
-| Función      | Pin        | Notas                                    |
-|--------------|------------|------------------------------------------|
-| Relé         | GPIO 27    | Activo en ALTO por defecto (ver `RELE_ACTIVO_ALTO`) |
-| Reset        | GPIO 14    | `INPUT_PULLUP`: conéctalo a GND para resetear |
+| Función      | Pin        | NodeMCU / D1 mini | Notas                                    |
+|--------------|------------|-------------------|------------------------------------------|
+| Relé         | GPIO 5     | D1                | Activo en ALTO por defecto (ver `RELE_ACTIVO_ALTO`) |
+| Reset        | GPIO 14    | D5                | `INPUT_PULLUP`: conéctalo a GND para resetear |
+| LED interno  | GPIO 2     | D4                | Activo en BAJO (LED_BUILTIN) |
+
+> Se evitan GPIO0, 1, 2, 3, 15 y 16 porque tienen estados especiales durante el
+> arranque. Si usas otro módulo, ajusta `RELE_PIN` y `RESET_PIN` a pines seguros.
+
+> Al arrancar, algunos GPIO del ESP8266 quedan en HIGH brevemente. Si tu módulo
+> de relé es activo en ALTO puede dar un pulso corto; los módulos activos en BAJO
+> (lo más habitual) no se activan con ese pulso. Ajusta `RELE_ACTIVO_ALTO` según
+> corresponda.
 
 ## Cómo funciona
 
-1. Al arrancar, se recuperan de NVS el tiempo acumulado y el estado del relé.
+1. Al arrancar, se recuperan de EEPROM el tiempo acumulado, el objetivo y el
+   estado del relé.
 2. Mientras el relé está **apagado**, el tiempo avanza y se muestra por el puerto
    serie cada segundo.
-3. Cada 10 s se guarda el tiempo acumulado en NVS.
-4. Al alcanzar `TIEMPO_OBJETIVO_MS` (3 horas), el relé se **activa** y el conteo
-   se **detiene** (queda fijado al valor objetivo).
+3. Cada 5 min se guarda el tiempo acumulado en EEPROM.
+4. Al alcanzar el objetivo (3 horas por defecto, configurable hasta 99 días), el
+   relé se **activa** y el conteo se **detiene** (queda fijado al valor objetivo).
 5. Al pulsar el reset (GPIO 14 a GND), se reinicia el conteo a `00:00:00`, se apaga
    el relé y se borra el estado guardado.
+
+## LED interno
+
+El LED de la placa (GPIO2 / `LED_BUILTIN`) muestra el estado sin necesidad de
+abrir la página web:
+
+- **Funcionamiento normal:** un destello corto (100 ms) cada segundo.
+- **Objetivo cumplido:** 10 destellos rápidos (100 ms encendido / 100 ms apagado),
+  seguidos de 5 segundos apagado, repitiéndose en bucle.
+
+El parpadeo es no bloqueante, así que no afecta al temporizador ni a la web.
+
+## Página web
+
+El ESP8266 crea su propia red WiFi:
+
+| Dato       | Valor                                      |
+|------------|--------------------------------------------|
+| Red (SSID) | `DaKiller-XXXX` (XXXX = últimos 4 dígitos de la MAC) |
+| Contraseña | `12345678`                                 |
+| URL        | http://192.168.4.1                         |
+
+Por ejemplo, para la MAC `BC:FF:4D:CF:E9:2B`, el SSID es `DaKiller-E92B`.
+
+Pasos:
+
+1. Conéctate desde el móvil o PC a la red WiFi **DaKiller-XXXX** (el SSID
+   incluye los últimos 4 dígitos hexadecimales de la MAC en mayúsculas).
+2. Abre `http://192.168.4.1` en el navegador.
+3. Verás el tiempo transcurrido, el objetivo, el tiempo restante y el estado del
+   relé, actualizándose cada segundo.
+4. En la tarjeta **Cambiar tiempo objetivo** puedes indicar días (0-99), horas,
+   minutos y segundos, y pulsar **Guardar objetivo**. El cambio se guarda en EEPROM.
+5. Botones disponibles: **Encender relé**, **Apagar relé** y **Resetear conteo**.
+
+> El objetivo máximo es de 99 días exactos. Si introduces `99` días junto con
+> horas/minutos/segundos, se rechazará por superar el límite.
+>
+> Al cambiar el objetivo no se reinicia el tiempo transcurrido. Si el relé estaba
+> activado porque se había cumplido el objetivo anterior y el nuevo objetivo es
+> mayor, se apaga y el conteo se reanuda automáticamente.
+
+> Cuando el tiempo objetivo se ha cumplido, el botón de apagar se deshabilita:
+> apagar el relé lo reactivaría al instante. Usa **Resetear conteo** para volver
+> a empezar.
+
+Endpoints HTTP (por si quieres automatizarlos):
+
+| Método | Ruta                          | Acción                             |
+|--------|-------------------------------|------------------------------------|
+| GET    | `/`                           | Página web                         |
+| GET    | `/estado`                     | Estado en JSON                     |
+| POST   | `/reset`                      | Reinicia el conteo                 |
+| POST   | `/rele?estado=on`             | Enciende el relé (manual)          |
+| POST   | `/rele?estado=off`            | Apaga el relé (si no terminó)      |
+| POST   | `/objetivo?d=0&h=3&m=0&s=0`   | Cambia el objetivo (días/h/m/s)    |
+
+La red deja de emitir si el ESP8266 se queda sin alimentación; al volver a
+encenderla, el AP se levanta de nuevo.
+
 
 ## Configuración
 
 Los parámetros principales están al inicio de `esp32_dakiller.ino`:
 
 ```cpp
-const int RELE_PIN = 27;                    // Pin del relé
-const int RESET_PIN = 14;                   // Pin de reset
-const long TIEMPO_OBJETIVO_MS = 3L*60L*60L*1000L; // 3 horas
+const int RELE_PIN = 5;                     // GPIO del relé
+const int RESET_PIN = 14;                   // GPIO de reset
+const uint64_t TIEMPO_OBJETIVO_POR_DEFECTO_MS = 3ULL*60ULL*60ULL*1000ULL; // 3 h
+const uint64_t TIEMPO_MAX_OBJETIVO_MS = 99ULL*24ULL*60ULL*60ULL*1000ULL;  // 99 días
 const unsigned long TIEMPO_REBOTE_MS = 50;  // Debounce del reset
+const unsigned long INTERVALO_GUARDADO_MS = 5UL*60UL*1000UL; // Guardado en EEPROM
 const bool RELE_ACTIVO_ALTO = true;         // false si el relé es activo en BAJO
+
+const char *AP_SSID_BASE = "DaKiller";      // Prefijo del SSID
+const char *AP_PASS = "12345678";           // Mínimo 8 caracteres
+// El SSID final se genera en setup como "DaKiller-XXXX" a partir de la MAC.
 ```
+
+> El SSID se genera automáticamente en cada arranque con los últimos 4 dígitos
+> hexadecimales de la MAC del chip.
+
+> El objetivo se puede cambiar en caliente desde la web; no hace falta recompilar.
 
 ## Compilar y subir con arduino-cli
 
-Requisitos: [arduino-cli](https://arduino.github.io/arduino-cli/) y el core de ESP32.
+Requiere el core `esp8266:esp8266`.
 
 ```bash
-# 1. Añadir el índice de placas de Espressif (si no lo tienes)
-arduino-cli config add board_manager.additional_urls \
-  https://espressif.github.io/arduino-esp32/package_esp32_index.json
+# 1. Instalar el core (si no lo tienes)
+arduino-cli core install esp8266:esp8266
 
-# 2. Actualizar el índice e instalar el core
-arduino-cli core update-index
-arduino-cli core install esp32:esp32
+# 2. Compilar (placa genérica)
+arduino-cli compile --fqbn esp8266:esp8266:generic .
 
-# 3. Compilar
-arduino-cli compile --fqbn esp32:esp32:esp32 .
+# 3. Subir (ajusta el puerto y, si hace falta, el FQBN de tu placa)
+arduino-cli upload -p /dev/ttyUSB0 --fqbn esp8266:esp8266:generic .
 
-# 4. Subir (ajusta el puerto si es necesario)
-arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 .
-
-# 5. Ver la salida serie
+# 4. Ver la salida serie
 arduino-cli monitor -p /dev/ttyUSB0 -c baudrate=115200
 ```
 
-> Nota: si tu placa es un modelo concreto (S2, S3, C3, etc.), usa el FQBN
-> correspondiente, p. ej. `esp32:esp32:esp32s3`.
+> Si tu placa es una NodeMCU o Wemos D1 mini, puedes usar
+> `esp8266:esp8266:nodemcuv2` en lugar de `generic`. Si la subida falla, revisa
+> la opción de tamaño de flash de tu módulo.
 
 ## Salida serie de ejemplo
 
 ```
 Tiempo objetivo: 03:00:00
-Tiempo recuperado de NVS: 00:00:00
+Tiempo recuperado de EEPROM: 00:00:00
 Rele inactivo. El conteo está en curso.
 Tiempo actual transcurrido: 00:00:05
 ...
-Guardando tiempo: 00:00:10
+Guardando tiempo: 00:05:00
 ...
 !!! TIEMPO CUMPLIDO (03:00:00) - RELE ACTIVADO Y CONTEO DETENIDO !!!
+```
+
+Ejemplo con un objetivo de varios días:
+
+```
+Tiempo objetivo: 10d 00:00:00
+Tiempo actual transcurrido: 9d 23:59:59
+Tiempo actual transcurrido: 10d 00:00:00
 ```
 
 ## Advertencias
 
 - Verifica la polaridad de tu módulo de relé (`RELE_ACTIVO_ALTO`). Un valor
   incorrecto puede activar el relé al revés de lo esperado.
-- En un corte de alimentación se pierde, como máximo, el tiempo transcurrido
-  desde el último guardado (≤ 10 s).
+- La EEPROM del ESP8266 se emula sobre un sector de flash con vida finita. Por
+  eso el guardado se hace cada 5 min. En un corte de alimentación se pierde,
+  como máximo, el tiempo transcurrido desde el último guardado (≤ 5 min).
+- Al cambiar el objetivo, el tiempo acumulado no se reinicia. Si quieres empezar
+  de cero con el nuevo objetivo, pulsa **Resetear conteo**.
+- El guardado valida un checksum; si el contenido está corrupto, el dispositivo
+  arranca desde cero.
+- Cambia `AP_PASS` por una contraseña propia. La red `DaKiller-XXXX` es local y
+  no tiene acceso a Internet.
