@@ -111,7 +111,7 @@ encenderla, el AP se levanta de nuevo.
 
 ## Configuración
 
-Los parámetros principales están al inicio de `esp32_dakiller.ino`:
+Los parámetros principales están al inicio de `dakiller-esp8266.ino`:
 
 ```cpp
 const int RELE_PIN = 5;                     // GPIO del relé
