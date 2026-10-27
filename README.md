@@ -12,13 +12,31 @@ Repositorio: <https://github.com/edfasano70/esp-dakiller>
 
 ## Versiones
 
-| Versión | Carpeta                 | Placa típica            | Persistencia         |
-|---------|-------------------------|-------------------------|----------------------|
-| ESP8266 | `dakiller-esp8266/`     | NodeMCU / Wemos D1 mini | EEPROM (flash)       |
-| ESP32   | `dakiller-esp32/`       | ESP32 DevKit            | NVS (`Preferences`)  |
+| Versión   | Carpeta             | Placa típica            | Persistencia             |
+|-----------|---------------------|-------------------------|--------------------------|
+| Unificada | `dakiller/`         | ESP8266 o ESP32         | EEPROM / NVS según placa |
+| ESP8266   | `dakiller-esp8266/` | NodeMCU / Wemos D1 mini | EEPROM (flash)           |
+| ESP32     | `dakiller-esp32/`   | ESP32 DevKit            | NVS (`Preferences`)      |
 
-Cada versión es un sketch independiente. Elige la carpeta de tu placa y
-compílala por separado.
+La versión unificada (`dakiller/`) contiene el mismo comportamiento y se adapta
+a la placa al compilar. Los sketches `dakiller-esp8266/` y `dakiller-esp32/` se
+conservan como versiones independientes.
+
+> Un mismo binario no puede funcionar en ambas arquitecturas. La selección se
+> hace al compilar o al flashear con `tools/flash.sh`; no en el arranque.
+
+## Versión unificada
+
+`dakiller/dakiller.ino` es un único código fuente que compila para ESP8266 y
+ESP32 usando compilación condicional. Al compilar se eligen automáticamente:
+
+- Pines y polaridad del LED.
+- Almacenamiento: EEPROM en ESP8266 y NVS en ESP32.
+- Librerías de WiFi y servidor web.
+- Obtención de la MAC para el SSID.
+
+El resultado siguen siendo dos binarios distintos. La detección del chip se
+puede automatizar al flashear con `tools/flash.sh` (ver Instalación).
 
 ## Características
 
@@ -30,6 +48,8 @@ compílala por separado.
 - Filtro de rebotes (*debounce*) en el pin de reset.
 - Polaridad del relé configurable (activo en alto o en bajo).
 - Página web en modo punto de acceso (AP) para ver el estado y controlar el relé.
+- Tarjeta de información de la placa en la web: chip, MAC, CPU, flash, SDK, core,
+  heap libre, IP, uptime y fecha de compilación del firmware.
 - Tiempo objetivo configurable desde la web, de 1 segundo a 99 días.
 - LED interno: 1 destello por segundo en funcionamiento normal y una secuencia
   de 10 destellos rápidos + 5 s de pausa cuando se cumple el objetivo.
@@ -117,10 +137,13 @@ Pasos:
 2. Abre `http://192.168.4.1` en el navegador.
 3. Verás el tiempo transcurrido, el objetivo, el tiempo restante y el estado del
    relé, actualizándose cada segundo.
-4. En la tarjeta **Cambiar tiempo objetivo** puedes indicar días (0-99), horas,
+4. La tarjeta **Información de la placa** muestra el modelo y revisión del chip,
+   núcleos, CPU, flash, MAC, SDK, core, heap libre, IP, SSID, uptime y fecha de
+   compilación del firmware.
+5. En la tarjeta **Cambiar tiempo objetivo** puedes indicar días (0-99), horas,
    minutos y segundos, y pulsar **Guardar objetivo**. El cambio se guarda en
    memoria no volátil.
-5. Botones disponibles: **Encender relé**, **Apagar relé** y **Resetear conteo**.
+6. Botones disponibles: **Encender relé**, **Apagar relé** y **Resetear conteo**.
 
 > El objetivo máximo es de 99 días exactos. Si introduces `99` días junto con
 > horas/minutos/segundos, se rechazará por superar el límite.
@@ -173,7 +196,27 @@ const bool LED_ACTIVO_ALTO = true;          // ajusta según tu placa
 const bool RELE_ACTIVO_ALTO = true;         // false si el relé es activo en BAJO
 ```
 
-### Comunes a ambas versiones
+### Versión unificada
+
+En `dakiller/dakiller.ino` los pines y el almacenamiento se eligen con
+`ARDUINO_ARCH_ESP8266` / `ARDUINO_ARCH_ESP32`. Los valores por defecto son los
+mismos que en los sketches independientes; ajusta el bloque de tu plataforma:
+
+```cpp
+#if defined(ARDUINO_ARCH_ESP8266)
+const int RELE_PIN = 5;                     // GPIO del relé (D1)
+const int RESET_PIN = 14;                   // GPIO de reset (D5)
+const int LED_PIN = LED_BUILTIN;
+const bool LED_ACTIVO_ALTO = false;
+#elif defined(ARDUINO_ARCH_ESP32)
+const int RELE_PIN = 27;                    // GPIO del relé
+const int RESET_PIN = 14;                   // GPIO de reset
+const int LED_PIN = 2;                      // LED interno del DevKit
+const bool LED_ACTIVO_ALTO = true;
+#endif
+```
+
+### Comunes a todas las versiones
 
 ```cpp
 const uint64_t TIEMPO_OBJETIVO_POR_DEFECTO_MS = 3ULL*60ULL*60ULL*1000ULL; // 3 h
@@ -198,6 +241,8 @@ const char *AP_PASS = "12345678";           // Mínimo 8 caracteres
 - Placa ESP8266 o ESP32.
 - [arduino-cli](https://arduino.github.io/arduino-cli/) o Arduino IDE 2.x con el
   core correspondiente (`esp8266:esp8266` o `esp32:esp32`).
+- `bash` para el script de flasheo automático (usa el `esptool` incluido en los
+  cores de Arduino).
 - Módulo de relé y cables.
 
 ### Clonar el repositorio
@@ -207,7 +252,41 @@ git clone https://github.com/edfasano70/esp-dakiller.git
 cd esp-dakiller
 ```
 
-### Compilar y subir la versión ESP8266
+### Flasheo automático (recomendado)
+
+`tools/flash.sh` detecta el chip conectado, elige el FQBN y flashea la versión
+unificada:
+
+```bash
+./tools/flash.sh
+```
+
+También puedes indicar el puerto o forzar el FQBN:
+
+```bash
+./tools/flash.sh /dev/ttyUSB0
+./tools/flash.sh /dev/ttyUSB0 esp32:esp32:esp32
+```
+
+El script detecta ESP8266, ESP32, ESP32-S3, ESP32-C3 y ESP32-C6. Si no detecta
+el chip, indica el puerto manualmente o mantén pulsado **BOOT** al conectar.
+
+### Compilar y subir la versión unificada
+
+```bash
+# ESP8266
+arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 dakiller
+
+arduino-cli upload -p /dev/ttyUSB0 \
+  --fqbn esp8266:esp8266:nodemcuv2:baud=57600 dakiller
+
+# ESP32
+arduino-cli compile --fqbn esp32:esp32:esp32 dakiller
+
+arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 dakiller
+```
+
+### Compilar y subir el sketch ESP8266 (independiente)
 
 ```bash
 arduino-cli core install esp8266:esp8266
@@ -218,7 +297,7 @@ arduino-cli upload -p /dev/ttyUSB0 \
   --fqbn esp8266:esp8266:nodemcuv2:baud=57600 dakiller-esp8266
 ```
 
-### Compilar y subir la versión ESP32
+### Compilar y subir el sketch ESP32 (independiente)
 
 ```bash
 arduino-cli core install esp32:esp32
@@ -237,17 +316,23 @@ arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 dakiller-esp32
 ### Abrir con Arduino IDE
 
 Abre el `.ino` de la carpeta correspondiente con Arduino IDE, selecciona tu placa
-y el puerto, y pulsa **Subir**.
+y el puerto, y pulsa **Subir**. Para la versión unificada abre
+`dakiller/dakiller.ino`; Arduino IDE generará el binario para la placa que
+selecciones.
 
 ## Estructura del repositorio
 
 ```text
 esp-dakiller/
 ├── README.md
+├── dakiller/
+│   └── dakiller.ino
 ├── dakiller-esp32/
 │   └── dakiller-esp32.ino
-└── dakiller-esp8266/
-    └── dakiller-esp8266.ino
+├── dakiller-esp8266/
+│   └── dakiller-esp8266.ino
+└── tools/
+    └── flash.sh
 ```
 
 ## Salida serie de ejemplo
@@ -285,6 +370,13 @@ Tiempo actual transcurrido: 10d 00:00:00
   `RELE_ACTIVO_ALTO`.
 - **El LED no parpadea o lo hace al revés:** revisa `LED_PIN` y
   `LED_ACTIVO_ALTO` según tu placa.
+- **El script no detecta el chip:** comprueba que el puerto existe, que el driver
+  USB está instalado y que la placa está en modo normal o bootloader. Prueba
+  `./tools/flash.sh /dev/ttyUSB0` o mantén pulsado **BOOT**.
+- **El script elige la placa equivocada:** pásale el FQBN explícitamente, por
+  ejemplo `./tools/flash.sh /dev/ttyUSB0 esp32:esp32:esp32s3`.
+- **La versión unificada no arranca en la otra placa:** es esperado; hay que
+  compilarla de nuevo para la arquitectura correcta.
 - **Se perdió el conteo tras actualizar el firmware:** si cambia la versión del
   formato de almacenamiento, el estado anterior se descarta y se inicializa de
   nuevo.

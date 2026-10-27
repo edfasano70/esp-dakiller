@@ -77,6 +77,7 @@ void handleEstado();
 void handleResetWeb();
 void handleReleWeb();
 void handleObjetivoWeb();
+void agregarInfoPlaca(String &json);
 void construirSsid();
 
 // --- Función Auxiliar para formatear el tiempo ---
@@ -184,6 +185,9 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   .big { font-size:2.4rem; font-variant-numeric:tabular-nums; margin:4px 0 14px; }
   .row { display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid #2c2c2e; }
   .row:first-of-type { border-top:0; }
+  .info .row { font-size:.9rem; }
+  .info .row span:first-child { white-space:nowrap; }
+  .info .row span:last-child { text-align:right; overflow-wrap:anywhere; margin-left:12px; }
   .activo { color:#ff453a; font-weight:600; }
   .apagado { color:#30d158; font-weight:600; }
   button { width:100%; padding:13px; margin-top:10px; border:0; border-radius:10px;
@@ -209,6 +213,22 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
     <div class="row"><span>Restante</span><span id="restante">--</span></div>
     <div class="row"><span>Relé</span><span id="rele">--</span></div>
   </div>
+  <div class="card info">
+    <div class="label">Información de la placa</div>
+    <div class="row"><span>Placa</span><span id="info_placa">--</span></div>
+    <div class="row"><span>Modelo</span><span id="info_modelo">--</span></div>
+    <div class="row"><span>Núcleos</span><span id="info_nucleos">--</span></div>
+    <div class="row"><span>CPU</span><span id="info_cpu">--</span></div>
+    <div class="row"><span>Flash</span><span id="info_flash">--</span></div>
+    <div class="row"><span>MAC</span><span id="info_mac">--</span></div>
+    <div class="row"><span>SDK</span><span id="info_sdk">--</span></div>
+    <div class="row"><span>Core</span><span id="info_core">--</span></div>
+    <div class="row"><span>Heap libre</span><span id="info_heap">--</span></div>
+    <div class="row"><span>IP del AP</span><span id="info_ip">--</span></div>
+    <div class="row"><span>SSID</span><span id="info_ssid">--</span></div>
+    <div class="row"><span>Uptime</span><span id="info_uptime">--</span></div>
+    <div class="row"><span>Firmware</span><span id="info_firmware">--</span></div>
+  </div>
   <div class="card">
     <div class="label">Cambiar tiempo objetivo (máx. 99 días)</div>
     <form id="formObj" onsubmit="guardarObjetivo(event)">
@@ -228,6 +248,10 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
 </main>
 <script>
 let objetivoCargado = false;
+function setInfo(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = (value === undefined || value === null) ? '--' : value;
+}
 async function actualizar() {
   try {
     const r = await fetch('/estado');
@@ -239,6 +263,19 @@ async function actualizar() {
     rele.textContent = d.rele ? 'ACTIVADO' : 'apagado';
     rele.className = d.rele ? 'activo' : 'apagado';
     document.getElementById('btnOff').disabled = d.completado;
+    setInfo('info_placa', d.placa);
+    setInfo('info_modelo', d.modelo);
+    setInfo('info_nucleos', d.nucleos);
+    setInfo('info_cpu', d.cpu);
+    setInfo('info_flash', d.flash);
+    setInfo('info_mac', d.mac);
+    setInfo('info_sdk', d.sdk);
+    setInfo('info_core', d.core);
+    setInfo('info_heap', d.heap);
+    setInfo('info_ip', d.ip);
+    setInfo('info_ssid', d.ssid);
+    setInfo('info_uptime', d.uptime);
+    setInfo('info_firmware', d.firmware);
     if (!objetivoCargado) {
       document.getElementById('dias').value = d.obj_d;
       document.getElementById('horas').value = d.obj_h;
@@ -304,6 +341,59 @@ uint64_t tiempoActualMs() {
   return tiempo_transcurrido_total_ms + (uint32_t)(millis() - tiempo_inicio_ciclo);
 }
 
+// --- Información de la placa para la web ---
+String formatearFlash(uint32_t bytes) {
+  if (bytes >= 1024UL * 1024UL) {
+    return String(bytes / (1024UL * 1024UL)) + " MB";
+  }
+  if (bytes >= 1024UL) {
+    return String(bytes / 1024UL) + " KB";
+  }
+  return String(bytes) + " B";
+}
+
+String macToString(const uint8_t *mac) {
+  char buffer[18];
+  snprintf(buffer, sizeof(buffer), "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(buffer);
+}
+
+void agregarInfoPlaca(String &json) {
+  uint8_t mac[6] = {0};
+  esp_efuse_mac_get_default(mac);
+
+  json += ",\"placa\":\"ESP32\"";
+  json += ",\"modelo\":\"";
+  json += String(ESP.getChipModel()) + " rev " +
+          String((unsigned)ESP.getChipRevision());
+  json += "\",\"nucleos\":\"";
+  json += String((unsigned)ESP.getChipCores());
+  json += "\",\"cpu\":\"";
+  json += String((unsigned long)ESP.getCpuFreqMHz());
+  json += " MHz\",\"flash\":\"";
+  json += formatearFlash(ESP.getFlashChipSize());
+  json += "\",\"mac\":\"";
+  json += macToString(mac);
+  json += "\",\"sdk\":\"";
+  json += ESP.getSdkVersion();
+  json += "\",\"core\":\"";
+  json += ESP.getCoreVersion();
+  json += "\",\"heap\":\"";
+  json += formatearFlash(ESP.getFreeHeap());
+  json += "\",\"ip\":\"";
+  json += WiFi.softAPIP().toString();
+  json += "\",\"ssid\":\"";
+  json += AP_SSID;
+  json += "\",\"uptime\":\"";
+  json += formatearTiempo((uint64_t)millis());
+  json += "\",\"firmware\":\"";
+  json += __DATE__;
+  json += " ";
+  json += __TIME__;
+  json += "\"";
+}
+
 // --- Handlers web ---
 void handleRaiz() {
   server.send_P(200, "text/html", INDEX_HTML);
@@ -320,7 +410,7 @@ void handleEstado() {
   uint32_t obj_s = obj_seg % 60UL;
 
   String json;
-  json.reserve(260);
+  json.reserve(900);
   json += "{\"tiempo\":\"";
   json += formatearTiempo(actual);
   json += "\",\"objetivo\":\"";
@@ -339,6 +429,7 @@ void handleEstado() {
   json += String(obj_m);
   json += ",\"obj_s\":";
   json += String(obj_s);
+  agregarInfoPlaca(json);
   json += "}";
 
   server.send(200, "application/json", json);
